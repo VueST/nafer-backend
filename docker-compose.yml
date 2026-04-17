@@ -1,0 +1,258 @@
+services:
+  # ============================================================
+  # INFRASTRUCTURE
+  # ============================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: nafer_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nafer_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-nafer_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nafer_admin} -d ${POSTGRES_DB:-nafer_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: nafer_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  minio:
+    image: minio/minio:latest
+    container_name: nafer_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-nafer_storage_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.7
+    container_name: nafer_meilisearch
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+      MEILI_ENV: development
+    ports:
+      - "7700:7700"
+    volumes:
+      - meilisearch_data:/meili_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ============================================================
+  # MICROSERVICES (added progressively per plan)
+  # ============================================================
+  identity_service:
+    build:
+      context: ./identity-service
+      dockerfile: Dockerfile
+    container_name: nafer_identity
+    restart: unless-stopped
+    ports:
+      - "8001:8080"
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-nafer_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-nafer_db}?sslmode=disable
+      REDIS_URL: redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-24h}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  media_service:
+    build:
+      context: ./media-service
+      dockerfile: Dockerfile
+    container_name: nafer_media
+    restart: unless-stopped
+    ports:
+      - "8002:8080"
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-nafer_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-nafer_db}?sslmode=disable
+      REDIS_URL: redis:6379
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-nafer_storage_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MEDIA_BUCKET: nafer-media
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  comment_service:
+    build:
+      context: ./comment-service
+      dockerfile: Dockerfile
+    container_name: nafer_comment
+    restart: unless-stopped
+    ports:
+      - "8003:8080"
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-nafer_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-nafer_db}?sslmode=disable
+      REDIS_URL: redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  notification_service:
+    build:
+      context: ./notification-service
+      dockerfile: Dockerfile
+    container_name: nafer_notification
+    restart: unless-stopped
+    ports:
+      - "8004:8080"
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-nafer_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-nafer_db}?sslmode=disable
+      REDIS_URL: redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  search_service:
+    build:
+      context: ./search-service
+      dockerfile: Dockerfile
+    container_name: nafer_search
+    restart: unless-stopped
+    ports:
+      - "8005:8080"
+    environment:
+      REDIS_URL: redis:6379
+      MEILI_URL: http://meilisearch:7700
+      MEILI_KEY: ${MEILI_MASTER_KEY}
+    depends_on:
+      redis:
+        condition: service_healthy
+      meilisearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  streaming_service:
+    build:
+      context: ./streaming-service
+      dockerfile: Dockerfile
+    container_name: nafer_streaming
+    restart: unless-stopped
+    ports:
+      - "8006:8080"
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-nafer_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-nafer_db}?sslmode=disable
+      REDIS_URL: redis:6379
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-nafer_storage_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  streaming_worker:
+    build:
+      context: ./streaming-service
+      dockerfile: Dockerfile
+    container_name: nafer_streaming_worker
+    restart: unless-stopped
+    entrypoint: ["./worker"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-nafer_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-nafer_db}?sslmode=disable
+      REDIS_URL: redis:6379
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-nafer_storage_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  meilisearch_data:

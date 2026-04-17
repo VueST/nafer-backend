@@ -1,0 +1,61 @@
+# --- Build Stage ---
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /app
+COPY . .
+
+# Build all services
+RUN go build -o bin/identity-service ./identity-service/cmd/api
+RUN go build -o bin/media-service ./media-service/cmd/api
+RUN go build -o bin/comment-service ./comment-service/cmd/api
+RUN go build -o bin/notification-service ./notification-service/cmd/api
+RUN go build -o bin/search-service ./search-service/cmd/api
+RUN go build -o bin/streaming-service ./streaming-service/cmd/api
+RUN go build -o bin/streaming-worker ./streaming-service/cmd/worker
+
+# --- Final Stage ---
+FROM alpine:latest
+
+# Install necessary runtime tools (Redis, Supervisor, Caddy, etc.)
+RUN apk add --no-cache ca-certificates caddy supervisor redis postgresql-client
+
+# Copy Meilisearch and Minio binaries from official images
+COPY --from=getmeili/meilisearch:v1.7 /bin/meilisearch /usr/local/bin/meilisearch
+COPY --from=minio/minio:latest /opt/bin/minio /usr/local/bin/minio
+
+WORKDIR /app
+COPY --from=builder /app/bin/* /app/bin/
+COPY .env.example .env
+
+# Setup Supervisor config for ALL 10 services (6 App + 4 Infra - minus Postgres which is external)
+RUN printf "[program:redis]\ncommand=redis-server\nautostart=true\nautorestart=true\n\n\
+[program:meilisearch]\ncommand=meilisearch --db-path /data/meili_data\nautostart=true\nautorestart=true\n\n\
+[program:minio]\ncommand=minio server /data/minio_data --address \":9000\" --console-address \":9001\"\nautostart=true\nautorestart=true\n\n\
+[program:identity]\ncommand=/app/bin/identity-service\nautostart=true\nautorestart=true\n\n\
+[program:media]\ncommand=/app/bin/media-service\nautostart=true\nautorestart=true\n\n\
+[program:comment]\ncommand=/app/bin/comment-service\nautostart=true\nautorestart=true\n\n\
+[program:notification]\ncommand=/app/bin/notification-service\nautostart=true\nautorestart=true\n\n\
+[program:search]\ncommand=/app/bin/search-service\nautostart=true\nautorestart=true\n\n\
+[program:streaming]\ncommand=/app/bin/streaming-service\nautostart=true\nautorestart=true\n\n\
+[program:worker]\ncommand=/app/bin/streaming-worker\nautostart=true\nautorestart=true\n" > /etc/supervisord.conf
+
+# Setup Caddy as a Gateway
+RUN printf ":{\$PORT} {\n\
+    handle_path /identity* { reverse_proxy localhost:8080 }\n\
+    handle_path /media* { reverse_proxy localhost:8081 }\n\
+    handle_path /comment* { reverse_proxy localhost:8082 }\n\
+    handle_path /notification* { reverse_proxy localhost:8083 }\n\
+    handle_path /search* { reverse_proxy localhost:8084 }\n\
+    handle_path /stream* { reverse_proxy localhost:8085 }\n\
+    handle_path /minio-console* { reverse_proxy localhost:9001 }\n\
+}" > /app/Caddyfile
+
+# Global Startup Script
+RUN mkdir -p /data/meili_data /data/minio_data
+RUN printf "#!/bin/sh\n\
+supervisord -c /etc/supervisord.conf &\n\
+caddy run --config /app/Caddyfile --adapter caddyfile\n" > /app/run.sh
+RUN chmod +x /app/run.sh
+
+EXPOSE 8080
+ENTRYPOINT ["/app/run.sh"]
