@@ -1,5 +1,5 @@
 # --- Build Stage ---
-FROM golang:1.23-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 WORKDIR /app
 COPY . .
@@ -16,8 +16,8 @@ RUN cd streaming-service && go build -o ../bin/streaming-worker ./cmd/worker
 # --- Final Stage ---
 FROM alpine:latest
 
-# Install necessary runtime tools (Redis, Supervisor, Caddy, etc.)
-RUN apk add --no-cache ca-certificates caddy supervisor redis postgresql-client
+# Install necessary runtime tools (Redis, Supervisor, Caddy, FFMPEG etc.)
+RUN apk add --no-cache ca-certificates caddy supervisor redis postgresql-client ffmpeg
 
 # Copy Meilisearch and Minio binaries from official images
 COPY --from=getmeili/meilisearch:v1.7 /bin/meilisearch /usr/local/bin/meilisearch
