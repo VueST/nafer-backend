@@ -27,28 +27,94 @@ WORKDIR /app
 COPY --from=builder /app/bin/* /app/bin/
 COPY .env.example .env
 
-# Setup Supervisor config for ALL 10 services (6 App + 4 Infra - minus Postgres which is external)
-RUN printf "[program:redis]\ncommand=redis-server\nautostart=true\nautorestart=true\n\n\
-[program:meilisearch]\ncommand=meilisearch --db-path /data/meili_data\nautostart=true\nautorestart=true\n\n\
-[program:minio]\ncommand=minio server /data/minio_data --address \":9000\" --console-address \":9001\"\nautostart=true\nautorestart=true\n\n\
-[program:identity]\ncommand=/app/bin/identity-service\nautostart=true\nautorestart=true\n\n\
-[program:media]\ncommand=/app/bin/media-service\nautostart=true\nautorestart=true\n\n\
-[program:comment]\ncommand=/app/bin/comment-service\nautostart=true\nautorestart=true\n\n\
-[program:notification]\ncommand=/app/bin/notification-service\nautostart=true\nautorestart=true\n\n\
-[program:search]\ncommand=/app/bin/search-service\nautostart=true\nautorestart=true\n\n\
-[program:streaming]\ncommand=/app/bin/streaming-service\nautostart=true\nautorestart=true\n\n\
-[program:worker]\ncommand=/app/bin/streaming-worker\nautostart=true\nautorestart=true\n" > /etc/supervisord.conf
+# Setup Supervisor config for ALL 10 services with UNIQUE ports
+RUN cat <<EOF > /etc/supervisord.conf
+[supervisord]
+nodaemon=true
+
+[program:redis]
+command=redis-server
+autostart=true
+autorestart=true
+
+[program:meilisearch]
+command=meilisearch --db-path /data/meili_data --master-key \${MEILI_MASTER_KEY}
+autostart=true
+autorestart=true
+
+[program:minio]
+command=minio server /data/minio_data --address ":9000" --console-address ":9001"
+autostart=true
+autorestart=true
+
+[program:identity]
+command=/app/bin/identity-service
+environment=PORT="8081"
+autostart=true
+autorestart=true
+
+[program:media]
+command=/app/bin/media-service
+environment=PORT="8082"
+autostart=true
+autorestart=true
+
+[program:comment]
+command=/app/bin/comment-service
+environment=PORT="8083"
+autostart=true
+autorestart=true
+
+[program:notification]
+command=/app/bin/notification-service
+environment=PORT="8084"
+autostart=true
+autorestart=true
+
+[program:search]
+command=/app/bin/search-service
+environment=PORT="8085"
+autostart=true
+autorestart=true
+
+[program:streaming]
+command=/app/bin/streaming-service
+environment=PORT="8086"
+autostart=true
+autorestart=true
+
+[program:worker]
+command=/app/bin/streaming-worker
+autostart=true
+autorestart=true
+EOF
 
 # Setup Caddy as a Gateway
-RUN printf ":{\$PORT} {\n\
-    handle_path /identity* { reverse_proxy localhost:8080 }\n\
-    handle_path /media* { reverse_proxy localhost:8081 }\n\
-    handle_path /comment* { reverse_proxy localhost:8082 }\n\
-    handle_path /notification* { reverse_proxy localhost:8083 }\n\
-    handle_path /search* { reverse_proxy localhost:8084 }\n\
-    handle_path /stream* { reverse_proxy localhost:8085 }\n\
-    handle_path /minio-console* { reverse_proxy localhost:9001 }\n\
-}" > /app/Caddyfile
+RUN cat <<EOF > /app/Caddyfile
+:{\$PORT} {
+    handle_path /identity* {
+        reverse_proxy localhost:8081
+    }
+    handle_path /media* {
+        reverse_proxy localhost:8082
+    }
+    handle_path /comment* {
+        reverse_proxy localhost:8083
+    }
+    handle_path /notification* {
+        reverse_proxy localhost:8084
+    }
+    handle_path /search* {
+        reverse_proxy localhost:8085
+    }
+    handle_path /stream* {
+        reverse_proxy localhost:8086
+    }
+    handle_path /minio-console* {
+        reverse_proxy localhost:9001
+    }
+}
+EOF
 
 # Global Startup Script
 RUN mkdir -p /data/meili_data /data/minio_data
@@ -57,5 +123,5 @@ supervisord -c /etc/supervisord.conf &\n\
 caddy run --config /app/Caddyfile --adapter caddyfile\n" > /app/run.sh
 RUN chmod +x /app/run.sh
 
-EXPOSE 8080
+EXPOSE 8081
 ENTRYPOINT ["/app/run.sh"]
