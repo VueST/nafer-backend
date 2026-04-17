@@ -5,13 +5,13 @@ WORKDIR /app
 COPY . .
 
 # Build all services
-RUN go build -o bin/identity-service ./identity-service/cmd/server
-RUN go build -o bin/media-service ./media-service/cmd/server
-RUN go build -o bin/comment-service ./comment-service/cmd/server
-RUN go build -o bin/notification-service ./notification-service/cmd/server
-RUN go build -o bin/search-service ./search-service/cmd/server
-RUN go build -o bin/streaming-service ./streaming-service/cmd/api
-RUN go build -o bin/streaming-worker ./streaming-service/cmd/worker
+RUN cd identity-service && go build -o ../bin/identity-service ./cmd/server
+RUN cd media-service && go build -o ../bin/media-service ./cmd/server
+RUN cd comment-service && go build -o ../bin/comment-service ./cmd/server
+RUN cd notification-service && go build -o ../bin/notification-service ./cmd/server
+RUN cd search-service && go build -o ../bin/search-service ./cmd/server
+RUN cd streaming-service && go build -o ../bin/streaming-service ./cmd/api
+RUN cd streaming-service && go build -o ../bin/streaming-worker ./cmd/worker
 
 # --- Final Stage ---
 FROM alpine:latest
