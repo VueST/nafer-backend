@@ -21,7 +21,7 @@ RUN apk add --no-cache ca-certificates caddy supervisor redis postgresql-client
 
 # Copy Meilisearch and Minio binaries from official images
 COPY --from=getmeili/meilisearch:v1.7 /bin/meilisearch /usr/local/bin/meilisearch
-COPY --from=minio/minio:latest /opt/bin/minio /usr/local/bin/minio
+COPY --from=minio/minio:latest /usr/bin/minio /usr/local/bin/minio
 
 WORKDIR /app
 COPY --from=builder /app/bin/* /app/bin/
