@@ -116,11 +116,27 @@ RUN cat <<EOF > /app/Caddyfile
 }
 EOF
 
+# Copy database migrations
+COPY --from=builder /app/identity-service/migrations /data/migrations/identity-service
+COPY --from=builder /app/media-service/migrations /data/migrations/media-service
+COPY --from=builder /app/comment-service/migrations /data/migrations/comment-service
+COPY --from=builder /app/notification-service/migrations /data/migrations/notification-service
+COPY --from=builder /app/streaming-service/migrations /data/migrations/streaming-service
+
 # Global Startup Script
 RUN mkdir -p /data/meili_data /data/minio_data
-RUN printf "#!/bin/sh\n\
-supervisord -c /etc/supervisord.conf &\n\
-caddy run --config /app/Caddyfile --adapter caddyfile\n" > /app/run.sh
+RUN cat <<'EOF' > /app/run.sh
+#!/bin/sh
+echo "--- Running Database Migrations ---"
+# Loop over all .sql files in all subdirectories and run them in alphabetical order
+for file in $(find /data/migrations -name '*.sql' | sort); do
+    echo "Executing $file..."
+    psql "$DATABASE_URL" -f "$file"
+done
+echo "--- Starting Services ---"
+supervisord -c /etc/supervisord.conf &
+caddy run --config /app/Caddyfile --adapter caddyfile
+EOF
 RUN chmod +x /app/run.sh
 
 EXPOSE 8081
